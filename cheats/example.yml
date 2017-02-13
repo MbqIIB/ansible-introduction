@@ -1,0 +1,12 @@
+---
+- hosts: webservers
+  become: yes 
+  vars:
+    my_name: jason 
+  tasks:
+    - name: ensure apache is at the latest version
+      yum: name=httpd state=latest
+    - name: start the httpd service
+      service: name=httpd state=started enabled=yes
+    - name: populate index.html
+      template: src=index.j2 dest=/var/www/html/index.html owner=apache group=apache mode=644

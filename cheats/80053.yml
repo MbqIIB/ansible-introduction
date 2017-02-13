@@ -1,0 +1,6 @@
+- hosts: webservers
+  connection: ssh
+  become: yes
+  gather_facts: yes
+  roles:
+    - ansible-role-800-53

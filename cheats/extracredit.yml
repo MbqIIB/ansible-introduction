@@ -1,0 +1,41 @@
+---
+  - hosts: webservers
+    become: yes
+    vars:
+      my_name: jason
+    tasks:
+    - name: ensure apache is at the latest version
+      yum: name=httpd state=latest
+    - name: start the httpd service
+      service: name=httpd state=started enabled=yes
+    - name: populate index.html
+      template: src=index.j2 dest=/var/www/html/index.html owner=apache group=apache mode=644
+
+    - name: ensure firewalld is at the latest version
+      yum: name=firewalld state=latest
+    - name: start and enable firewalld
+      service: name=firewalld state=started enabled=yes
+    - name: permit http
+      firewalld: service=http state=enabled permanent=true zone=public immediate=yes
+
+    - name: install python-passlib for htpasswd support
+      yum: name=python-passlib state=latest
+    - name: touch the htpasswd file
+      file: path=/usr/local/htpasswd state=touch owner=apache group=apache mode=640
+    - name: create an htpasswd file
+      htpasswd: path=/usr/local/htpasswd name=jason password=password
+    - name: copy the .htaccess file
+      copy: src=dothtaccess dest=/var/www/html/.htaccess owner=apache group=apache mode=640
+    - name: fix AllowOverride in httpd.conf
+      replace:
+        dest: /etc/httpd/conf/httpd.conf
+        regexp: '^(\s*)AllowOverride(.*)'
+        replace: '\1AllowOverride AuthConfig'
+    - name: add AccessFileName directive
+      lineinfile:
+        dest: /etc/httpd/conf/httpd.conf
+        state: present
+        line: 'AccessFileName ".htaccess"'
+    - name: reload apache
+      service: name=httpd state=restarted
+

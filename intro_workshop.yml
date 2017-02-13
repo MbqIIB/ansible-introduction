@@ -1,0 +1,184 @@
+---
+- hosts: localhost
+  connection: local
+  become: false
+  gather_facts: no
+  vars:
+    cluster_id: ansible_workshop
+    ec2_keypair: ansible_workshop
+    ec2_region: us-east-1
+    ec2_az: a
+    ec2_username: ec2-user
+    ec2_image: ami-2051294a
+    ec2_instance_type: t2.medium
+    #count: 2 # do this from --extra-vars
+    r53_zone: rhtps.io
+
+  tasks:
+  - name: Create the public vpc
+    ec2_vpc:
+      state: present
+      dns_support: yes
+      dns_hostnames: yes
+      cidr_block: 192.168.0.0/16
+      resource_tags:
+        env: "{{ cluster_id }}"
+        Name: "{{ cluster_id }}-public"
+      region: "{{ ec2_region }}"
+      subnets:
+      - cidr: 192.168.0.0/24
+        az: "{{ ec2_region }}{{ ec2_az }}"
+        resource_tags:
+          env: "{{ cluster_id }}"
+          Name: "{{ cluster_id }}-public-{{ ec2_az }}"
+          parent_vpc: "{{ cluster_id }}-public"
+      internet_gateway: yes
+      wait: yes
+    register: public_vpc
+
+  - name: Set up public subnet route tables
+    ec2_vpc_route_table:
+      vpc_id: "{{ public_vpc.vpc_id }}"
+      region: "{{ ec2_region }}"
+      tags:
+        Name: public
+        env: "{{ cluster_id }}"
+      subnets:
+        - "{{ public_vpc.subnets[0].id }}"
+      routes:
+        - dest: 0.0.0.0/0
+          gateway_id: "{{ public_vpc.igw_id }}"
+    register: public_route_table
+
+  - name: Set security group rules
+    ec2_group:
+      name: "{{ cluster_id }}-sg"
+      description: "{{ cluster_id }} security group"
+      region: "{{ ec2_region }}"
+      vpc_id: "{{ public_vpc.vpc_id }}"
+      rules:
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+      rules_egress:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+    register: group
+
+  - name: Create ec2 workshop instances
+    ec2:
+      image: "{{ ec2_image }}"
+      region: "{{ ec2_region }}"
+      key_name: "{{ ec2_keypair }}"
+      instance_type: "{{ ec2_instance_type }}"
+      group_id: "{{ group.group_id }}"
+      instance_tags:
+        Name: "{{ cluster_id }}_student_instance"
+        instance_role: "{{ cluster_id }}_student_instance"
+        env: "{{ cluster_id }}"
+      exact_count: "{{ count }}"
+      count_tag:
+        Name: "{{ cluster_id }}_student_instance"
+        instance_role: "{{ cluster_id }}_student_instance"
+        env: "{{ cluster_id }}"
+      wait: yes
+      volumes:
+        - volume_size: 10
+          device_type: gp2
+          device_name: /dev/sda1
+          delete_on_termination: true
+        - volume_size: 10
+          device_type: gp2
+          device_name: /dev/sdb
+          delete_on_termination: true
+      assign_public_ip: yes
+      vpc_subnet_id: "{{ public_vpc.subnets[0].id }}"
+    register: ec2
+
+  # These next two tasks build a list of instances regardless of whether or
+  # not they're getting created in this run, or if they already exist.
+  - set_fact:
+      ec2_instances:  "{{ ec2.instances }}"
+    when: ec2.instances is defined and ec2.instances
+
+  - set_fact:
+      ec2_instances: "{{ ec2.tagged_instances }}"
+    when: ec2.tagged_instances is defined and ec2.tagged_instances
+
+  - name: Create Route 53 entries
+    route53:
+      command: create
+      zone: "{{ r53_zone }}"
+      record: "student-{{ item[0] }}.workshop.{{ r53_zone }}"
+      type: A
+      ttl: 300
+      value: "{{ item[1].public_ip }}"
+      overwrite: yes
+      wait: yes
+    with_indexed_items: "{{ ec2_instances }}"
+
+  - name: Wait for SSH to come up on ec2 instances
+    wait_for: host={{ item.public_dns_name }} port=22 delay=0 timeout=600 state=started
+    with_items:
+      - "{{ ec2_instances }}"
+
+  - name: Wait for successful SSH
+    command: "ssh -o StrictHostKeyChecking=no -o PasswordAuthentication=no -o ConnectTimeout=10 -o UserKnownHostsFile=/dev/null ec2-user@{{ item.public_dns_name }} echo host is up"
+    with_items:
+      - "{{ ec2_instances }}"
+    register: result
+    until: result.rc == 0
+    retries: 60
+    delay: 60
+
+- hosts: tag_instance_role_ansible_workshop_student_instance
+  connection: ssh
+  gather_facts: yes
+  become: true
+  pre_tasks:
+    - meta: refresh_inventory
+  tasks:
+    - name: Copy private key
+      copy:
+        src: ./ansible_workshop.pem
+        dest: /home/ec2-user/.ssh/ansible_workshop.pem
+        owner: ec2-user
+        mode: 0600
+    - name: install EPEL repo
+      yum:
+        name: https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+        state: present
+    - name: set up default cfg file
+      copy:
+        src: ./workshop_ansible.cfg
+        dest: /root/ansible.cfg
+        owner: root
+        mode: 0644
+    - name: install some workshop packages
+      yum:
+        name: nano, git, vim, tmux
+        state: installed
+    - name: create the cheats directory
+      file:
+        path: /root/cheats
+        state: directory
+        owner: root
+        mode: 0755
+    - name: copy cheat files
+      copy:
+        src: ./cheats
+        dest: /root
+        owner: root
+    - name: make the roles directory
+      file:
+        path: /root/roles
+        state: directory
+    - name: clone the 800-53 role
+      command: /usr/bin/git clone https://github.com/redhatgov/ansible-role-800-53
+      args:
+        chdir: /root/roles

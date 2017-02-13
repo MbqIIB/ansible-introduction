@@ -87,3 +87,8 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+*.pem
+.idea
+*.retry
+.DS_Store
