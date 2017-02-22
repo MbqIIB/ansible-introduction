@@ -146,7 +146,7 @@
     - name: Copy private key
       copy:
         src: ./ansible_workshop.pem
-        dest: /home/ec2-user/.ssh/ansible_workshop.pem
+        dest: /root/ansible_workshop.pem
         owner: ec2-user
         mode: 0600
     - name: install EPEL repo
@@ -182,3 +182,4 @@
       command: /usr/bin/git clone https://github.com/redhatgov/ansible-role-800-53
       args:
         chdir: /root/roles
+        creates: /root/roles/ansible-role-800-53

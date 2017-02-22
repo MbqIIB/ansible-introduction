@@ -1,5 +1,5 @@
 Host *
-User ec2-user
+  User ec2-user
   ForwardAgent yes
   StrictHostKeyChecking no
   IdentityFile /root/ansible_workshop.pem

@@ -1,0 +1,5 @@
+AuthType Basic
+AuthName "Please login"
+AuthBasicProvider file
+AuthUserFile /usr/local/htpasswd
+Require user jason

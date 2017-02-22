@@ -17,7 +17,6 @@
       service: name=firewalld state=started enabled=yes
     - name: permit http
       firewalld: service=http state=enabled permanent=true zone=public immediate=yes
-
     - name: install python-passlib for htpasswd support
       yum: name=python-passlib state=latest
     - name: touch the htpasswd file

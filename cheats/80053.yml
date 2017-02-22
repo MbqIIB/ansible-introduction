@@ -1,6 +1,13 @@
+---
 - hosts: webservers
   connection: ssh
   become: yes
   gather_facts: yes
   roles:
-    - ansible-role-800-53
+    - ../roles/ansible-role-800-53
+  tasks:
+    - name: copy the OpenSCAP report
+      shell: >
+        cp $(ls -dtr /tmp/scap_reports/scan-xccdf-report* | head -1) /var/www/html/report.html;
+        chmod 644 /var/www/html/*;
+        restorecon -R /var/www/html
